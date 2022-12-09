@@ -238,12 +238,14 @@ class TurnGPTWandbCallbacks(pl.Callback):
         )
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        self.trp_plots(trainer, pl_module, name="TRP/example")
-        self.generate(trainer, pl_module, name="Gen")
+        pass
+        #self.trp_plots(trainer, pl_module, name="TRP/example")
+        #self.generate(trainer, pl_module, name="Gen")
 
     def on_save_checkpoint(self, trainer, pl_module, *args, **kwargs):
-        self.trp_plots(trainer, pl_module, name="TRP-chpt/example")
-        self.generate(trainer, pl_module, name="Gen-chpt")
+        pass
+        #self.trp_plots(trainer, pl_module, name="TRP-chpt/example")
+        #self.generate(trainer, pl_module, name="Gen-chpt")
 
 
 class TurnGPT(pl.LightningModule, Utils):
@@ -272,6 +274,8 @@ class TurnGPT(pl.LightningModule, Utils):
         weight_decay=0.0,
         dropout=None,
         num_speakers=2,
+        use_closeup=False,
+        use_corner=False,
         **model_kwargs,
     ):
         super().__init__()
@@ -301,10 +305,20 @@ class TurnGPT(pl.LightningModule, Utils):
 
         # TRP projection head
         self.trp_projection_steps = trp_projection_steps
+        self.use_closeup = use_closeup
+        self.use_corner = use_corner
         self.train_accuracy, self.valid_accuracy, self.test_accuracy = None, None, None
         if trp_projection_steps > 0:
             self.trp_projection_type = trp_projection_type
+
+            # Change the size of the input for trp_projection_head
+            # Currently hard coded for AMI
             hidden_size = self.transformer.config.hidden_size
+            if self.use_closeup:
+                hidden_size += 6 * self.num_speakers
+            if self.use_corner:
+                hidden_size += 72 * 86
+            
             task = 'multiclass' if self.num_speakers > 2 else 'binary'
             self.train_accuracy = torchmetrics.Recall(task=task, average='macro',        # might change the var names
                                                         num_classes=self.num_speakers, top_k=1)
@@ -317,9 +331,6 @@ class TurnGPT(pl.LightningModule, Utils):
             if trp_projection_type.lower() == "attention":
                 raise NotImplementedError()
             else:
-                self.trp_projection_head = nn.Sequential(
-                    nn.Dropout(p=dropout) if dropout is not None else nn.Identity(),
-                    )
                 if self.num_speakers > 2:
                     self.trp_projection_head = nn.Sequential(
                         nn.Dropout(p=dropout) if dropout is not None else nn.Identity(),
@@ -329,7 +340,6 @@ class TurnGPT(pl.LightningModule, Utils):
                     self.trp_projection_head = nn.Sequential(
                         nn.Dropout(p=dropout) if dropout is not None else nn.Identity(),
                         nn.Linear(hidden_size, 1))
-                # nn.Sequential doesn't have attribute as "append"
 
         self.tokenizer = None # None until calling init_tokenizer
 
@@ -536,7 +546,6 @@ class TurnGPT(pl.LightningModule, Utils):
         self,
         input_ids=None,
         speaker_ids=None,
-        num_speakers=None,
         labels=None,
         mc_labels=None,
         use_cache=None,
@@ -548,6 +557,8 @@ class TurnGPT(pl.LightningModule, Utils):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        closeup=None,
+        corner=None,
         **kwargs,
     ):
         """
@@ -576,7 +587,6 @@ class TurnGPT(pl.LightningModule, Utils):
         )
 
         hidden_states = transformer_outputs[0]
-        num_speakers = self.num_speakers
 
         # Set device for model parallelism
         if self.transformer.model_parallel:
@@ -592,16 +602,21 @@ class TurnGPT(pl.LightningModule, Utils):
         # MultiTask Modeling
         mc_logits = None
         mc_loss = None
+
+        # Concat closeup and corner with hidden_states
+        input_trp_head = hidden_states
+        if closeup is not None:
+            input_trp_head = torch.cat((input_trp_head, closeup), -1)
+        if corner is not None:
+            input_trp_head = torch.cat((input_trp_head, corner), -1)
         if self.trp_projection_steps > 0:
-            # NOTE:
-            # Assumed to only guess a single class
-            if num_speakers == 2:
-                mc_logits = self.trp_projection_head(hidden_states).squeeze(-1)   # still need to check
+            if self.num_speakers == 2:
+                mc_logits = self.trp_projection_head(input_trp_head).squeeze(-1)   # still need to check
             else:
-                mc_logits = self.trp_projection_head(hidden_states)
+                mc_logits = self.trp_projection_head(input_trp_head)
 
             if mc_labels is not None:
-                if num_speakers == 2:
+                if self.num_speakers == 2:
                     mc_loss = self.ce_loss(mc_logits, mc_labels)
                 else:
                     mc_loss = self.ce_loss(mc_logits, speaker_ids)
@@ -659,12 +674,21 @@ class TurnGPT(pl.LightningModule, Utils):
         if self.omit_dialog_states:
             batch["speaker_ids"] = None
 
+        closeup = None
+        if self.use_closeup:
+            closeup = torch.cat([batch['closeup{}'.format(i+1)] for i in range(self.num_speakers)], -1)
+        corner = None
+        if self.use_corner:
+            corner=batch['corner']
+
         out = self.forward(
             batch["input_ids"],
             speaker_ids=batch["speaker_ids"],
             labels=lm_labels,
             mc_labels=proj_labels,
             attention_mask=batch["attention_mask"],
+            closeup=closeup,
+            corner=corner,
         )
 
         if self.trp_projection_steps > 0:
@@ -700,12 +724,21 @@ class TurnGPT(pl.LightningModule, Utils):
         if self.omit_dialog_states:
             batch["speaker_ids"] = None
 
+        closeup = None
+        if self.use_closeup:
+            closeup = torch.cat([batch['closeup{}'.format(i+1)] for i in range(self.num_speakers)], -1)
+        corner = None
+        if self.use_corner:
+            corner=batch['corner']
+
         out = self.forward(
             batch["input_ids"],
             speaker_ids=batch["speaker_ids"],
             labels=lm_labels,
             mc_labels=proj_labels,
             attention_mask=batch["attention_mask"],
+            closeup=closeup,
+            corner=corner,
         )
 
         if self.trp_projection_steps > 0:
@@ -744,12 +777,21 @@ class TurnGPT(pl.LightningModule, Utils):
         if self.omit_dialog_states:
             batch["speaker_ids"] = None
 
+        closeup = None
+        if self.use_closeup:
+            closeup = torch.cat([batch['closeup{}'.format(i+1)] for i in range(self.num_speakers)], -1)
+        corner = None
+        if self.use_corner:
+            corner=batch['corner']
+
         out = self.forward(
             batch["input_ids"],
             speaker_ids=batch["speaker_ids"],
             labels=lm_labels,
             mc_labels=proj_labels,
             attention_mask=batch["attention_mask"],
+            closeup=closeup,
+            corner=corner,
         )
 
         ret = self.test_generate(batch)
@@ -891,6 +933,8 @@ class TurnGPT(pl.LightningModule, Utils):
             type=str,
             help="'Linear' or 'Attention'",
         )
+        parser.add_argument("--use_closeup", action="store_true") # For AMI
+        parser.add_argument("--use_corner", action="store_true") # For AMI
 
         # Training
         parser.add_argument(

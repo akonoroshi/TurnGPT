@@ -91,7 +91,9 @@ def train():
             no_train_first_n=args.no_train_first_n,
             omit_dialog_states=args.omit_dialog_states,
             weight_decay=args.weight_decay,
-            num_speakers=args.num_speakers
+            num_speakers=args.num_speakers,
+            use_closeup=args.use_closeup,
+            use_corner=args.use_corner,
         )
         model.init_tokenizer()  # required for fresh model (saved on checkpoint)
         model.initialize_special_embeddings()  # required for fresh model (also performed in on_load_checkpoint)
@@ -124,6 +126,7 @@ def train():
             overwrite=args.overwrite,
             load_from_cache_file=args.load_from_cache_file,
             num_proc=args.num_proc,
+            tensorpath=args.tensorpath,
         )
 
     dm.prepare_data()
