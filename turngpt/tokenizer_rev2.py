@@ -153,6 +153,12 @@ class tokenizer_AMI():
                 new_word_ids.append(word_ids[-1][:7])
                 new_word_start_times.append(word_start_times[-1])
                 new_word_end_times.append(word_end_times[-1])
+
+        new_words.append(eos)
+        new_speakers.append(self.map_from_speaker_id[speakers[-1]])
+        new_word_ids.append(word_ids[-1][:7])
+        new_word_start_times.append(word_end_times[-1])
+        new_word_end_times.append(word_end_times[-1])
       
         
         return new_words, new_speakers, new_word_ids, new_word_start_times, new_word_end_times
