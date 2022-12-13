@@ -933,8 +933,8 @@ class TurnGPT(pl.LightningModule, Utils):
             type=str,
             help="'Linear' or 'Attention'",
         )
-        parser.add_argument("--use_closeup", action="store_true") # For AMI
-        parser.add_argument("--use_corner", action="store_true") # For AMI
+        parser.add_argument("--use_closeup", action="store_true", default=True) # For AMI
+        parser.add_argument("--use_corner", action="store_true", default=True) # For AMI
 
         # Training
         parser.add_argument(
