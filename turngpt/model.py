@@ -610,16 +610,19 @@ class TurnGPT(pl.LightningModule, Utils):
         if corner is not None:
             input_trp_head = torch.cat((input_trp_head, corner), -1)
         if self.trp_projection_steps > 0:
-            if self.num_speakers == 2:
-                mc_logits = self.trp_projection_head(input_trp_head).squeeze(-1)   # still need to check
-            else:
-                mc_logits = self.trp_projection_head(input_trp_head)
-
-            if mc_labels is not None:
+            try:
                 if self.num_speakers == 2:
-                    mc_loss = self.ce_loss(mc_logits, mc_labels)
+                    mc_logits = self.trp_projection_head(input_trp_head).squeeze(-1)   # still need to check
                 else:
-                    mc_loss = self.ce_loss(mc_logits, speaker_ids)
+                    mc_logits = self.trp_projection_head(input_trp_head)
+
+                if mc_labels is not None:
+                    if self.num_speakers == 2:
+                        mc_loss = self.ce_loss(mc_logits, mc_labels)
+                    else:
+                        mc_loss = self.ce_loss(mc_logits, speaker_ids)
+            except RuntimeError as e:
+                print(e)
 
         # if not return_dict:
         #     output = (lm_logits, mc_logits) + transformer_outputs[1:]
@@ -695,14 +698,15 @@ class TurnGPT(pl.LightningModule, Utils):
             self.log("loss_lm", out["loss"])
             self.log("loss_projection", out["mc_loss"])
             total_loss = out["loss"] + out["mc_loss"]
-            return {"loss": total_loss, "mc_logits": out["mc_logits"].detach(), "mc_labels": proj_labels.detach()}
+            mc_logits = out["mc_logits"].detach() if out["mc_logits"] is not None else None
+            return {"loss": total_loss, "mc_logits": mc_logits, "mc_labels": proj_labels.detach()}
         else:
             self.log("loss", out["loss"])
             total_loss = out["loss"]
             return {"loss": total_loss}
 
     def training_step_end(self, step_output):
-        if self.trp_projection_steps > 0:
+        if self.trp_projection_steps > 0 and step_output["mc_logits"] is not None:
             shift_logits, shift_labels = self.shift_logits_labels(step_output["mc_logits"], step_output["mc_labels"])
             self.train_accuracy(shift_logits, shift_labels)
             self.log("bAcc", self.train_accuracy, prog_bar=True, logger=False)
