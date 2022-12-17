@@ -317,7 +317,7 @@ class TurnGPT(pl.LightningModule, Utils):
             if self.use_closeup:
                 hidden_size += 6 * self.num_speakers
             if self.use_corner:
-                hidden_size += 72 * 86
+                hidden_size += 6336
             
             task = 'multiclass' if self.num_speakers > 2 else 'binary'
             self.train_accuracy = torchmetrics.Recall(task=task, average='macro',        # might change the var names
