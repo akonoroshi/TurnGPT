@@ -835,8 +835,6 @@ class TurnGPT(pl.LightningModule, Utils):
     @torch.no_grad()
     def test_generate(self, batch):
         input_ids = batch['input_ids'].numpy(force=True)
-        if not self.omit_dialog_states:
-            speaker_ids = batch['speaker_ids'].numpy(force=True)
 
         scores = {'BLEU-2': 0, 'BLEU-4': 0, 'METEOR': 0, 'NIST-2': 0, 'NIST-4': 0, 'count': 0}
         for b in range(len(input_ids)):
@@ -853,7 +851,15 @@ class TurnGPT(pl.LightningModule, Utils):
                 if self.omit_dialog_states:
                     batch_for_gen["speaker_ids"] = None
                 else:
-                    batch_for_gen["speaker_ids"] = torch.from_numpy(speaker_ids[b][:split_indices[i]]).unsqueeze(0).to(self.device)
+                    batch_for_gen["speaker_ids"] = batch['speaker_ids'][b][:split_indices[i]].unsqueeze(0)
+                
+                # Add images
+                if self.use_closeup:
+                    batch_for_gen["closeup"] = torch.cat([batch['closeup{}'.format(i+1)][
+                        b][:split_indices[i]].unsqueeze(0) for i in range(self.num_speakers)], -1)
+                if self.use_corner:
+                    batch_for_gen["corner"] = batch['corner'][b][:split_indices[i]].unsqueeze(0)
+                
                 generated = generate_greedy_from_tokenized(self, batch_for_gen, 100, True)['tokens'][0]
 
                 # Preprocess for NLTK metrics and compute them

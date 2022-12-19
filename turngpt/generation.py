@@ -88,6 +88,7 @@ def generate_greedy_from_tokenized(
     """Generate by sampling"""
     # prepare input for model
     batch["attention_mask"] = None
+    batch_size = batch["input_ids"].shape[0]
 
     # keep track of everything if `use_cache` is True
     generated = {"input_ids": [], "speaker_ids": []}
@@ -118,6 +119,12 @@ def generate_greedy_from_tokenized(
         if not model.omit_dialog_states:
             batch["speaker_ids"] = next_speaker.unsqueeze(-1)
             generated["speaker_ids"].append(next_speaker)
+
+        # Add blank input image features
+        if model.use_closeup:
+            batch["closeup"] = torch.zeros((batch_size, 6*model.num_speakers))
+        if model.use_corner:
+            batch["corner"] = torch.zeros((batch_size, 6336))
 
         if stop_at_eos and next_token.squeeze() == model.tokenizer.eos_token_id:
             break
