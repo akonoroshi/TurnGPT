@@ -679,6 +679,8 @@ class TurnGPT(pl.LightningModule, Utils):
 
         closeup = None
         if self.use_closeup:
+            for i in range(self.num_speakers):
+                print(i+1, batch['closeup{}'.format(i+1).shape)
             closeup = torch.cat([batch['closeup{}'.format(i+1)] for i in range(self.num_speakers)], -1)
         corner = None
         if self.use_corner:
